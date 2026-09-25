@@ -33,9 +33,16 @@
 
 <p align="center">
   <a href="https://frontend-production-9606.up.railway.app"><strong>🌐 Live App</strong></a> ·
+  <a href="https://youtu.be/AxBWFTnr6-I"><strong>🎬 Watch on YouTube</strong></a> ·
   <a href="https://backend-production-c6aa1.up.railway.app/docs"><strong>📖 API Docs</strong></a> ·
   <a href="https://backend-production-c6aa1.up.railway.app/health"><strong>💚 Health Check</strong></a>
 </p>
+
+<br/>
+
+### 🎬 Product Walkthrough
+
+https://github.com/user-attachments/assets/46bfa7de-7edc-49d7-8ae7-7cdea8d40881
 
 <br/>
 
@@ -46,7 +53,6 @@
 <br/>
 
 </div>
-
 ---
 
 ## 📚 Table of Contents
