@@ -45,6 +45,19 @@ export function VoiceButton({
     onStatusChange?.(state);
   }, [state, onStatusChange]);
 
+  // Submit once recognition has fully ended, not on the stop click — the
+  // final result usually lands after stop(), so submitting on click sent
+  // stale/partial text.
+  const submitOnEndRef = useRef(false);
+  const transcriptRef = useRef(transcript);
+  transcriptRef.current = transcript;
+  useEffect(() => {
+    if (state !== "idle" || !submitOnEndRef.current) return;
+    submitOnEndRef.current = false;
+    const finalText = transcriptRef.current.trim();
+    if (finalText) onSubmit?.(finalText);
+  }, [state, onSubmit]);
+
   // Waveform animation while recording
   useEffect(() => {
     if (state !== "recording") {
@@ -90,8 +103,8 @@ export function VoiceButton({
 
   const handleClick = () => {
     if (state === "recording") {
+      submitOnEndRef.current = true;
       stop();
-      if (transcript.trim()) onSubmit?.(transcript.trim());
     } else if (state === "idle") {
       start();
     }

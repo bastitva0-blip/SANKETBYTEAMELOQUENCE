@@ -18,6 +18,18 @@ const SPEECH_LANG_MAP: Record<string, string> = {
 
 const FORCE_RESET_MS = 2000;
 
+// Append `next` to `acc`, unless one already contains the other — some
+// engines deliver cumulative chunks ("weather in" then "weather in delhi").
+function joinUnique(acc: string, next: string): string {
+  if (!next) return acc;
+  if (!acc) return next;
+  const a = acc.toLowerCase();
+  const n = next.toLowerCase();
+  if (n.startsWith(a)) return next;
+  if (a.endsWith(n)) return acc;
+  return `${acc} ${next}`;
+}
+
 function getSpeechRecognition(): any {
   return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 }
@@ -36,24 +48,32 @@ export function useVoiceRecorder(sessionId: string, hintLang?: string) {
 
   const startWebSpeech = useCallback((SpeechRecognitionCtor: any) => {
     const recognition = new SpeechRecognitionCtor();
-    recognition.lang = SPEECH_LANG_MAP[hintLang || "hi"] || "en-IN";
-    recognition.continuous = true;
+    recognition.lang = SPEECH_LANG_MAP[hintLang || "en"] || "en-IN";
+    // Single-utterance mode. With continuous=true, Android Chrome repeats the
+    // whole utterance in every final result (and resultIndex resets), so
+    // appending finals doubled the text: "12" -> "12 12". A weather query is
+    // one utterance anyway; recognition ends on its own after a pause.
+    recognition.continuous = false;
     recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
 
     recognition.onstart = () => setIsRecording(true);
 
     recognition.onresult = (event: any) => {
+      // Rebuild from the full results list on every event instead of
+      // appending to previous state — idempotent, so re-delivered results
+      // can't duplicate text.
       let finalText = "";
       let interimText = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const chunk = event.results[i][0].transcript;
-        if (event.results[i].isFinal) finalText += chunk;
-        else interimText += chunk;
+      for (let i = 0; i < event.results.length; i++) {
+        const chunk = event.results[i][0].transcript.trim();
+        if (event.results[i].isFinal) finalText = joinUnique(finalText, chunk);
+        else interimText = joinUnique(interimText, chunk);
       }
       setInterimTranscript(interimText);
       if (finalText) {
-        setTranscript((prev) => (prev ? `${prev} ${finalText}` : finalText).trim());
-        setDetectedLang(hintLang || "hi");
+        setTranscript(finalText);
+        setDetectedLang(hintLang || "en");
       }
     };
 
