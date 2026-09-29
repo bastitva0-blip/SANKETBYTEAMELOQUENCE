@@ -83,6 +83,25 @@ _CITY_IDS: dict[str, int] = {
 }
 
 
+# IMD answers 401 "Your IP/Domain ... needs to be whitelisted" to any caller
+# not on its allowlist (Railway egress included). Once seen, skip IMD for a
+# while instead of paying a sequential round-trip on every weather lookup.
+_BLOCKED_KEY = "imd:blocked"
+_BLOCKED_TTL_SECONDS = 6 * 3600
+
+
+async def _imd_blocked(redis) -> bool:
+    return bool(await redis.get(_BLOCKED_KEY))
+
+
+async def _mark_blocked(redis, status_code: int) -> None:
+    logger.warning(
+        f"IMD API returned {status_code} (IP not whitelisted) — skipping IMD for "
+        f"{_BLOCKED_TTL_SECONDS // 3600}h, OpenWeatherMap will be used"
+    )
+    await redis.setex(_BLOCKED_KEY, _BLOCKED_TTL_SECONDS, "1")
+
+
 def _get_city_id(location_name: str) -> int | None:
     return _CITY_IDS.get(location_name.lower().strip())
 
@@ -153,6 +172,8 @@ async def fetch_imd_weather(location_name: str) -> dict | None:
     cached    = await redis.get(cache_key)
     if cached:
         return json.loads(cached)
+    if await _imd_blocked(redis):
+        return None
 
     headers = {}
     if settings.IMD_API_KEY:
@@ -166,6 +187,9 @@ async def fetch_imd_weather(location_name: str) -> dict | None:
                 headers=headers,
                 timeout=10.0,
             )
+            if resp.status_code in (401, 403):
+                await _mark_blocked(redis, resp.status_code)
+                return None
             if resp.status_code != 200:
                 logger.warning(f"IMD API returned {resp.status_code} for city_id={city_id}")
                 return None
@@ -192,6 +216,8 @@ async def fetch_imd_forecast(location_name: str) -> list[dict]:
     cached    = await redis.get(cache_key)
     if cached:
         return json.loads(cached)
+    if await _imd_blocked(redis):
+        return []
 
     headers = {}
     if settings.IMD_API_KEY:
@@ -205,6 +231,9 @@ async def fetch_imd_forecast(location_name: str) -> list[dict]:
                 headers=headers,
                 timeout=10.0,
             )
+            if resp.status_code in (401, 403):
+                await _mark_blocked(redis, resp.status_code)
+                return []
             if resp.status_code != 200:
                 return []
             forecasts = _parse_imd_forecast(resp.json())

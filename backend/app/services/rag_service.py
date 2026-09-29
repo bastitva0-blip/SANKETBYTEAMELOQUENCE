@@ -21,13 +21,23 @@ DOCUMENT_CATEGORIES = [
 
 _client = None
 _collection = None
+# chromadb is an optional dep (see requirements.txt) — when it isn't
+# installed, disable RAG once instead of re-importing and logging a warning
+# on every query.
+_chromadb_missing = False
 
 
 def _get_collection():
-    global _client, _collection
+    global _client, _collection, _chromadb_missing
     if _collection is not None:
         return _collection
-    import chromadb
+    try:
+        import chromadb
+    except ImportError:
+        if not _chromadb_missing:
+            logger.warning("chromadb not installed — RAG disabled, answers use live data only")
+        _chromadb_missing = True
+        return None
     _client = chromadb.HttpClient(host=settings.CHROMADB_HOST, port=settings.CHROMADB_PORT)
     _collection = _client.get_or_create_collection(COLLECTION_NAME)
     return _collection
@@ -46,7 +56,9 @@ async def ingest_document(text: str, source: str, domain: str, url: str = "") ->
     chunks = _chunk_text(text)
     try:
         collection = _get_collection()
-        ids = [f"{source}-{i}" for i in range(len(chunks))]
+        if collection is None:
+            return len(chunks)
+        ids =[f"{source}-{i}" for i in range(len(chunks))]
         metadatas = [{"source": source, "page": i, "url": url, "domain": domain} for i in range(len(chunks))]
         collection.add(documents=chunks, ids=ids, metadatas=metadatas)
     except Exception as e:
@@ -57,7 +69,9 @@ async def ingest_document(text: str, source: str, domain: str, url: str = "") ->
 async def retrieve(query: str, n_results: int = 5) -> list[dict]:
     try:
         collection = _get_collection()
-        result = collection.query(query_texts=[query], n_results=n_results)
+        if collection is None:
+            return []
+        result =collection.query(query_texts=[query], n_results=n_results)
         docs = result.get("documents", [[]])[0]
         metas = result.get("metadatas", [[]])[0]
         return [{"text": d, **m} for d, m in zip(docs, metas)]
