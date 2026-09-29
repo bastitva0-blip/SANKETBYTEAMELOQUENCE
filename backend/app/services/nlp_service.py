@@ -76,14 +76,14 @@ _LANG_NAMES = {
 }
 
 
-def translate_to_english(text: str, src_lang: str) -> str:
+async def translate_to_english(text: str, src_lang: str) -> str:
     if src_lang == "en":
         return text
     if not llm_client.is_configured():
         return text  # offline/test fallback — keyword classifier below tolerates romanized input
     try:
         lang_name = _LANG_NAMES.get(src_lang, src_lang)
-        return llm_client.chat_completion(
+        translated, _ = await llm_client.chat_completion(
             system=(
                 f"Translate the user's {lang_name} weather query to English. "
                 "Return ONLY the translated text, no quotes, no explanation."
@@ -91,20 +91,21 @@ def translate_to_english(text: str, src_lang: str) -> str:
             user=text,
             max_tokens=300,
             temperature=0.0,
-        ).strip()
+        )
+        return translated.strip() or text
     except Exception as e:
         logger.warning(f"Translation to English failed, using original text: {e}")
         return text
 
 
-def translate_from_english(en_text: str, tgt_lang: str) -> str:
+async def translate_from_english(en_text: str, tgt_lang: str) -> str:
     if tgt_lang == "en":
         return en_text
     if not llm_client.is_configured():
         return en_text
     try:
         lang_name = _LANG_NAMES.get(tgt_lang, tgt_lang)
-        return llm_client.chat_completion(
+        translated, _ = await llm_client.chat_completion(
             system=(
                 f"Translate this weather assistant answer to {lang_name}. "
                 "Keep numbers, place names, and units unchanged. "
@@ -113,7 +114,8 @@ def translate_from_english(en_text: str, tgt_lang: str) -> str:
             user=en_text,
             max_tokens=400,
             temperature=0.0,
-        ).strip()
+        )
+        return translated.strip() or en_text
     except Exception as e:
         logger.warning(f"Translation from English failed, returning English text: {e}")
         return en_text
@@ -188,7 +190,27 @@ def _extract_location(en_text: str) -> str | None:
     return None
 
 
-def _extract_location_llm(en_text: str) -> str | None:
+# Words that can follow "in"/"at"/"for" without being a place ("rain in the
+# evening", "forecast for tomorrow") — rejected by the lowercase fallback.
+_PREPOSITION_NON_PLACES = _LOCATION_STOPWORDS | {
+    "the", "a", "an", "my", "our", "this", "next", "coming", "morning", "evening",
+    "night", "afternoon", "week", "weekend", "month", "hours", "days", "now",
+    "general", "detail", "english", "hindi", "celsius", "fahrenheit", "mm", "cm",
+}
+
+
+def _extract_location_preposition(en_text: str) -> str | None:
+    """Last-resort, LLM-free fallback for lowercase queries ("weather in pune
+    today") — without it, a failed/unconfigured LLM silently drops the city
+    and the answer is about the frontend's location_hint instead."""
+    for match in re.finditer(r"\b(?:in|at|for|near)\s+([a-z][a-z]+)\b", en_text.lower()):
+        word = match.group(1)
+        if word not in _PREPOSITION_NON_PLACES:
+            return word.title()
+    return None
+
+
+async def _extract_location_llm(en_text: str) -> str | None:
     """LLM fallback for when the proper-noun regex finds nothing — covers
     casually-typed lowercase queries ("will it be sunny in lucknow") and
     any place name worldwide, not just capitalized Indian towns. Only
@@ -197,7 +219,7 @@ def _extract_location_llm(en_text: str) -> str | None:
     if not llm_client.is_configured():
         return None
     try:
-        raw = llm_client.chat_completion(
+        raw, _ = await llm_client.chat_completion(
             system=(
                 "Extract the place name (city, town, region, or landmark) mentioned in this "
                 "weather query, anywhere in the world. Reply with ONLY the place name, "
@@ -206,7 +228,8 @@ def _extract_location_llm(en_text: str) -> str | None:
             user=en_text,
             max_tokens=30,
             temperature=0.0,
-        ).strip().strip('"')
+        )
+        raw = raw.strip().strip('"')
         if not raw or raw.upper() == "NONE":
             return None
         return raw
@@ -281,16 +304,16 @@ def use_case_for_intent(intent: str, en_text: str) -> str:
 
 
 async def nlp_pipeline(raw_message: str) -> dict:
-    import asyncio
-
     lang = detect_language(raw_message)
-    en_text = await asyncio.to_thread(translate_to_english, raw_message, lang)
+    en_text = await translate_to_english(raw_message, lang)
     intent_result = classify_intent(en_text)
     intent = intent_result["intent"]
     confidence = intent_result["confidence"]
     slots = extract_slots(en_text, intent) if intent != "clarification_needed" else {}
     if intent != "clarification_needed" and not slots.get("location"):
-        slots["location"] = await asyncio.to_thread(_extract_location_llm, en_text)
+        slots["location"] = (
+            await _extract_location_llm(en_text) or _extract_location_preposition(en_text)
+        )
     return {
         "lang": lang,
         "en_text": en_text,

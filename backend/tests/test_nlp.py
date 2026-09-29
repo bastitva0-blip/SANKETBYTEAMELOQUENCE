@@ -63,3 +63,33 @@ async def test_nlp_pipeline_fisherman_use_case():
     result = await nlp_pipeline("Is it safe to go fishing near Kochi tomorrow?")
     assert result["intent"] == "marine_advisory"
     assert result["use_case_context"] == "fisherman"
+
+
+def test_lowercase_city_fallback_without_llm():
+    # Regression: lowercase city + failed LLM extraction silently answered
+    # for the frontend's location_hint (e.g. Lucknow) instead of the asked city.
+    from app.services.nlp_service import _extract_location_preposition
+    assert _extract_location_preposition("weather in pune today") == "Pune"
+    assert _extract_location_preposition("will it rain in the evening") is None
+    assert _extract_location_preposition("forecast for tomorrow") is None
+
+
+@pytest.mark.asyncio
+async def test_nlp_pipeline_lowercase_city():
+    result = await nlp_pipeline("will it rain in patna tomorrow")
+    assert result["slots"]["location"] == "Patna"
+
+
+def test_lowercase_city_fallback_without_llm():
+    # Regression: lowercase city + failed LLM extraction silently answered
+    # for the frontend's location_hint (e.g. Lucknow) instead of the asked city.
+    from app.services.nlp_service import _extract_location_preposition
+    assert _extract_location_preposition("weather in pune today") == "Pune"
+    assert _extract_location_preposition("will it rain in the evening") is None
+    assert _extract_location_preposition("forecast for tomorrow") is None
+
+
+@pytest.mark.asyncio
+async def test_nlp_pipeline_lowercase_city():
+    result = await nlp_pipeline("will it rain in patna tomorrow")
+    assert result["slots"]["location"] == "Patna"

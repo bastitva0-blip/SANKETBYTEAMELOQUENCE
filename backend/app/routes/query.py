@@ -39,8 +39,7 @@ async def query(body: QueryRequest, api_key: str = Depends(verify_api_key), db: 
     nlp_result = await nlp_service.nlp_pipeline(body.message)
 
     if nlp_result["intent"] == "clarification_needed":
-        clarification = await asyncio.to_thread(
-            nlp_service.translate_from_english,
+        clarification = await nlp_service.translate_from_english(
             "Could you clarify your location and what weather info you need?", nlp_result["lang"],
         )
         return QueryResponse(

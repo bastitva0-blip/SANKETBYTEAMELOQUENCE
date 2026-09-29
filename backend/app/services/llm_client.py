@@ -44,7 +44,9 @@ def _ollama_reachable() -> bool:
         return False
 
 
-async def chat_completion(system: str, user: str, max_tokens: int = 400) -> tuple[str, str]:
+async def chat_completion(
+    system: str, user: str, max_tokens: int = 400, temperature: float = 0.2,
+) -> tuple[str, str]:
     """Returns (answer_text, llm_source)."""
 
     if LOCAL_ENABLED:
@@ -57,7 +59,7 @@ async def chat_completion(system: str, user: str, max_tokens: int = 400) -> tupl
                         {"role": "user", "content": user},
                     ],
                     max_tokens=max_tokens,
-                    temperature=0.2,
+                    temperature=temperature,
                     timeout=8.0,
                 )
                 logger.info("llm: qwen2.5-7b local (Ollama)")
@@ -76,7 +78,7 @@ async def chat_completion(system: str, user: str, max_tokens: int = 400) -> tupl
                     {"role": "user", "content": user},
                 ],
                 max_tokens=max_tokens,
-                temperature=0.2,
+                temperature=temperature,
                 timeout=15.0,
             )
             source = "nvidia-nim-fallback" if LOCAL_ENABLED else "nvidia-nim"
